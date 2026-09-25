@@ -1,0 +1,7 @@
+{
+  "name": "GSTC Garki School Management Portal",
+  "description": "Comprehensive school administration portal for Govt. Science & Tech. College Garki featuring staff & student management, results, scratch card verification, and multi-language support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
