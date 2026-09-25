@@ -1,14 +1,23 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserSession, Language } from '../types';
 import { translations, Translations } from '../i18n/translations';
+import { auth, googleProvider } from '../firebase';
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+  User as FirebaseUser,
+} from 'firebase/auth';
 
 interface AuthContextType {
   user: UserSession | null;
+  firebaseUser: FirebaseUser | null;
   language: Language;
   t: Translations;
   isRTL: boolean;
   setLanguage: (lang: Language) => void;
   login: (username: string, pin: string) => Promise<{ success: boolean; message?: string }>;
+  loginWithGoogle: () => Promise<{ success: boolean; message?: string }>;
   quickDemoLogin: (role: 'admin' | 'staff' | 'student') => void;
   logout: () => void;
 }
@@ -19,6 +28,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [language, setLanguageState] = useState<Language>(() => {
     return (localStorage.getItem('gstc_lang') as Language) || 'en';
   });
+
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
 
   const [user, setUser] = useState<UserSession | null>(() => {
     const saved = localStorage.getItem('gstc_user');
@@ -38,12 +49,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
   }, [language]);
 
+  // Synchronize Firebase Auth State
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
+      setFirebaseUser(fbUser);
+      if (fbUser) {
+        const isAdmin = fbUser.email === 'freelanderdba@gmail.com' || fbUser.email?.includes('admin');
+        const session: UserSession = {
+          id: fbUser.uid,
+          username: fbUser.email?.split('@')[0] || 'google_user',
+          name: fbUser.displayName || fbUser.email || 'Authorized User',
+          role: isAdmin ? 'admin' : 'staff',
+          email: fbUser.email || undefined,
+          avatar: fbUser.photoURL || undefined,
+        };
+        setUser(session);
+        localStorage.setItem('gstc_user', JSON.stringify(session));
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   const setLanguage = (newLang: Language) => {
     setLanguageState(newLang);
   };
 
   const t = translations[language] || translations.en;
   const isRTL = language === 'ar';
+
+  const loginWithGoogle = async (): Promise<{ success: boolean; message?: string }> => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const fbUser = result.user;
+      const isAdmin = fbUser.email === 'freelanderdba@gmail.com' || fbUser.email?.includes('admin');
+      const sessionUser: UserSession = {
+        id: fbUser.uid,
+        username: fbUser.email?.split('@')[0] || 'google_user',
+        name: fbUser.displayName || 'Authorized User',
+        role: isAdmin ? 'admin' : 'staff',
+        email: fbUser.email || undefined,
+        avatar: fbUser.photoURL || undefined,
+      };
+      setUser(sessionUser);
+      localStorage.setItem('gstc_user', JSON.stringify(sessionUser));
+      return { success: true };
+    } catch (err: unknown) {
+      console.error('Google Sign In Error:', err);
+      const message = err instanceof Error ? err.message : 'Google authentication failed';
+      return { success: false, message };
+    }
+  };
 
   const login = async (username: string, pin: string): Promise<{ success: boolean; message?: string }> => {
     const cleanUser = username.trim().toLowerCase();
@@ -156,7 +211,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('gstc_user', JSON.stringify(sessionUser));
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await firebaseSignOut(auth);
+    } catch {
+      // ignore
+    }
     setUser(null);
     localStorage.removeItem('gstc_user');
   };
@@ -165,11 +225,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         user,
+        firebaseUser,
         language,
         t,
         isRTL,
         setLanguage,
         login,
+        loginWithGoogle,
         quickDemoLogin,
         logout,
       }}

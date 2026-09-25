@@ -1,0 +1,170 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny all unspecified paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE PRIMITIVE HELPERS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email == 'freelanderdba@gmail.com' &&
+        request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    // --- ENTITY VALIDATION HELPERS ---
+    function isValidStaff(data) {
+      return data.keys().hasAll(['username', 'name', 'phone', 'subjectsTaught', 'formTeacherOf']) &&
+        data.keys().hasOnly(['id', 'username', 'name', 'phone', 'email', 'password', 'subjectsTaught', 'formTeacherOf', 'createdAt']) &&
+        data.username is string && data.username.size() <= 64 &&
+        data.name is string && data.name.size() <= 128 &&
+        data.phone is string && data.phone.size() <= 32 &&
+        data.formTeacherOf is string && data.formTeacherOf.size() <= 64 &&
+        data.subjectsTaught is list && data.subjectsTaught.size() <= 20;
+    }
+
+    function isValidClassRoom(data) {
+      return data.keys().hasAll(['name', 'department', 'capacity']) &&
+        data.keys().hasOnly(['id', 'name', 'department', 'formTeacherName', 'studentCount', 'capacity']) &&
+        data.name is string && data.name.size() <= 64 &&
+        data.department is string && data.department.size() <= 128 &&
+        data.capacity is number && data.capacity > 0 && data.capacity <= 200;
+    }
+
+    function isValidSubject(data) {
+      return data.keys().hasAll(['code', 'name', 'category']) &&
+        data.keys().hasOnly(['id', 'code', 'name', 'category', 'assignedTeachers']) &&
+        data.code is string && data.code.size() <= 32 &&
+        data.name is string && data.name.size() <= 128 &&
+        data.category in ['Core', 'Vocational / Technical', 'Science'];
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll(['admissionNo', 'fullName', 'gender', 'className', 'guardianPhone']) &&
+        data.keys().hasOnly(['id', 'admissionNo', 'fullName', 'gender', 'className', 'dob', 'guardianName', 'guardianPhone', 'address', 'scratchCardPin', 'status']) &&
+        data.admissionNo is string && data.admissionNo.size() <= 64 &&
+        data.fullName is string && data.fullName.size() <= 128 &&
+        data.gender in ['Male', 'Female'] &&
+        data.className is string && data.className.size() <= 64 &&
+        data.guardianPhone is string && data.guardianPhone.size() <= 32;
+    }
+
+    function isValidScratchCard(data) {
+      return data.keys().hasAll(['serialNumber', 'pin', 'maxUsage', 'usageCount', 'status']) &&
+        data.keys().hasOnly(['id', 'serialNumber', 'pin', 'maxUsage', 'usageCount', 'status', 'usedByAdmissionNo', 'createdAt']) &&
+        data.serialNumber is string && data.serialNumber.size() <= 64 &&
+        data.pin is string && data.pin.size() <= 32 &&
+        data.maxUsage is number && data.maxUsage <= 20 &&
+        data.usageCount is number && data.usageCount <= data.maxUsage &&
+        data.status in ['active', 'used', 'expired'];
+    }
+
+    function isValidResult(data) {
+      return data.keys().hasAll(['admissionNo', 'studentName', 'className', 'term', 'session', 'scores', 'totalScore']) &&
+        data.keys().hasOnly(['id', 'studentId', 'admissionNo', 'studentName', 'className', 'term', 'session', 'scores', 'totalScore', 'averageScore', 'position', 'outOf', 'timesSchoolOpened', 'timesPresent', 'teacherRemarks', 'principalRemarks', 'nextTermBegins']) &&
+        data.admissionNo is string && data.admissionNo.size() <= 64 &&
+        data.studentName is string && data.studentName.size() <= 128 &&
+        data.className is string && data.className.size() <= 64 &&
+        data.scores is list && data.scores.size() <= 30 &&
+        data.totalScore is number;
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll(['schoolName', 'currentTerm', 'currentSession']) &&
+        data.keys().hasOnly(['schoolName', 'subtitle', 'motto', 'address', 'phone', 'email', 'currentTerm', 'currentSession', 'nextTermResumption', 'principalName', 'examOfficerName']) &&
+        data.schoolName is string && data.schoolName.size() <= 128 &&
+        data.currentTerm is string && data.currentTerm.size() <= 64 &&
+        data.currentSession is string && data.currentSession.size() <= 32;
+    }
+
+    // --- COLLECTION RULES ---
+
+    // Admins Collection
+    match /admins/{adminId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if isBootstrappedAdmin() && isValidId(adminId);
+    }
+
+    // Staff Collection
+    match /staff/{staffId} {
+      allow get, list: if true;
+      allow create: if (isAdmin() || isSignedIn()) && isValidId(staffId) && isValidStaff(incoming());
+      allow update: if (isAdmin() || isSignedIn()) && isValidId(staffId) && isValidStaff(incoming());
+      allow delete: if isAdmin() && isValidId(staffId);
+    }
+
+    // Classes Collection
+    match /classes/{classId} {
+      allow get, list: if true;
+      allow create: if (isAdmin() || isSignedIn()) && isValidId(classId) && isValidClassRoom(incoming());
+      allow update: if (isAdmin() || isSignedIn()) && isValidId(classId) && isValidClassRoom(incoming());
+      allow delete: if isAdmin() && isValidId(classId);
+    }
+
+    // Subjects Collection
+    match /subjects/{subjectId} {
+      allow get, list: if true;
+      allow create: if (isAdmin() || isSignedIn()) && isValidId(subjectId) && isValidSubject(incoming());
+      allow update: if (isAdmin() || isSignedIn()) && isValidId(subjectId) && isValidSubject(incoming());
+      allow delete: if isAdmin() && isValidId(subjectId);
+    }
+
+    // Students Collection
+    match /students/{studentId} {
+      allow get, list: if true;
+      allow create: if (isAdmin() || isSignedIn()) && isValidId(studentId) && isValidStudent(incoming());
+      allow update: if (isAdmin() || isSignedIn()) && isValidId(studentId) && isValidStudent(incoming());
+      allow delete: if isAdmin() && isValidId(studentId);
+    }
+
+    // Scratch Cards Collection
+    match /scratchCards/{cardId} {
+      allow get, list: if true;
+      allow create: if (isAdmin() || isSignedIn()) && isValidId(cardId) && isValidScratchCard(incoming());
+      allow update: if isValidId(cardId) && isValidScratchCard(incoming());
+      allow delete: if isAdmin() && isValidId(cardId);
+    }
+
+    // Results Collection
+    match /results/{resultId} {
+      allow get, list: if true;
+      allow create: if (isAdmin() || isSignedIn()) && isValidId(resultId) && isValidResult(incoming());
+      allow update: if (isAdmin() || isSignedIn()) && isValidId(resultId) && isValidResult(incoming());
+      allow delete: if isAdmin() && isValidId(resultId);
+    }
+
+    // School Settings Collection
+    match /settings/{docId} {
+      allow get, list: if true;
+      allow create, update: if (isAdmin() || isSignedIn()) && isValidId(docId) && isValidSettings(incoming());
+      allow delete: if false;
+    }
+
+    // Connection testing doc
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

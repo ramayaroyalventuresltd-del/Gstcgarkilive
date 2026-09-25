@@ -1,0 +1,171 @@
+{
+  "entities": {
+    "Staff": {
+      "title": "Staff",
+      "description": "Instructor or academic staff member of GSTC Garki",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_/\\-]+$" },
+        "name": { "type": "string", "maxLength": 128 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 128 },
+        "subjectsTaught": { "type": "array", "description": "List of subjects taught" },
+        "formTeacherOf": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["username", "name", "phone", "subjectsTaught", "formTeacherOf"]
+    },
+    "ClassRoom": {
+      "title": "ClassRoom",
+      "description": "Class or vocational trade arm",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 64 },
+        "department": { "type": "string", "maxLength": 128 },
+        "formTeacherName": { "type": "string", "maxLength": 128 },
+        "studentCount": { "type": "number" },
+        "capacity": { "type": "number" }
+      },
+      "required": ["name", "department", "capacity"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "Curriculum course or trade subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 32 },
+        "name": { "type": "string", "maxLength": 128 },
+        "category": { "type": "string", "enum": ["Core", "Vocational / Technical", "Science"] },
+        "assignedTeachers": { "type": "array" }
+      },
+      "required": ["code", "name", "category"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Enrolled student at GSTC Garki",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "admissionNo": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_/\\-]+$" },
+        "fullName": { "type": "string", "maxLength": 128 },
+        "gender": { "type": "string", "enum": ["Male", "Female"] },
+        "className": { "type": "string", "maxLength": 64 },
+        "dob": { "type": "string", "maxLength": 32 },
+        "guardianName": { "type": "string", "maxLength": 128 },
+        "guardianPhone": { "type": "string", "maxLength": 32 },
+        "address": { "type": "string", "maxLength": 256 },
+        "scratchCardPin": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["Active", "Graduated", "Transferred"] }
+      },
+      "required": ["admissionNo", "fullName", "gender", "className", "guardianPhone"]
+    },
+    "ScratchCard": {
+      "title": "ScratchCard",
+      "description": "PIN token for checking terminal exam results",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "serialNumber": { "type": "string", "maxLength": 64 },
+        "pin": { "type": "string", "maxLength": 32 },
+        "maxUsage": { "type": "number" },
+        "usageCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "used", "expired"] },
+        "usedByAdmissionNo": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["serialNumber", "pin", "maxUsage", "usageCount", "status"]
+    },
+    "StudentResult": {
+      "title": "StudentResult",
+      "description": "Terminal continuous assessment and examination results",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "admissionNo": { "type": "string", "maxLength": 64 },
+        "studentName": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 64 },
+        "term": { "type": "string", "maxLength": 64 },
+        "session": { "type": "string", "maxLength": 32 },
+        "scores": { "type": "array" },
+        "totalScore": { "type": "number" },
+        "averageScore": { "type": "number" },
+        "position": { "type": "number" },
+        "outOf": { "type": "number" },
+        "timesSchoolOpened": { "type": "number" },
+        "timesPresent": { "type": "number" },
+        "teacherRemarks": { "type": "string", "maxLength": 512 },
+        "principalRemarks": { "type": "string", "maxLength": 512 },
+        "nextTermBegins": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["admissionNo", "studentName", "className", "term", "session", "scores", "totalScore"]
+    },
+    "SchoolSettings": {
+      "title": "SchoolSettings",
+      "description": "Global school configuration and current academic term",
+      "type": "object",
+      "properties": {
+        "schoolName": { "type": "string", "maxLength": 128 },
+        "subtitle": { "type": "string", "maxLength": 128 },
+        "motto": { "type": "string", "maxLength": 256 },
+        "address": { "type": "string", "maxLength": 256 },
+        "phone": { "type": "string", "maxLength": 64 },
+        "email": { "type": "string", "maxLength": 128 },
+        "currentTerm": { "type": "string", "maxLength": 64 },
+        "currentSession": { "type": "string", "maxLength": 32 },
+        "nextTermResumption": { "type": "string", "maxLength": 64 },
+        "principalName": { "type": "string", "maxLength": 128 },
+        "examOfficerName": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["schoolName", "currentTerm", "currentSession"]
+    },
+    "AdminProfile": {
+      "title": "AdminProfile",
+      "description": "Privileged administrator registration",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/staff/{staffId}": {
+      "schema": "Staff",
+      "description": "Collection of academic and technical staff instructors"
+    },
+    "/classes/{classId}": {
+      "schema": "ClassRoom",
+      "description": "Collection of classroom trades and vocational arms"
+    },
+    "/subjects/{subjectId}": {
+      "schema": "Subject",
+      "description": "Collection of technical and academic subjects"
+    },
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Collection of enrolled student profiles"
+    },
+    "/scratchCards/{cardId}": {
+      "schema": "ScratchCard",
+      "description": "Collection of 12-digit online result checker scratch cards"
+    },
+    "/results/{resultId}": {
+      "schema": "StudentResult",
+      "description": "Collection of student terminal broadsheets and report cards"
+    },
+    "/settings/config": {
+      "schema": "SchoolSettings",
+      "description": "Singleton configuration document for the school"
+    },
+    "/admins/{adminId}": {
+      "schema": "AdminProfile",
+      "description": "Collection of authorized administrators"
+    }
+  }
+}

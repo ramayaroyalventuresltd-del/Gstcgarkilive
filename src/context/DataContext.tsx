@@ -10,6 +10,15 @@ import {
   AdminUser,
   SchoolSettings,
 } from '../types';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  getDocs,
+} from 'firebase/firestore';
 
 interface DataContextType {
   staffList: Staff[];
@@ -22,17 +31,18 @@ interface DataContextType {
   adminList: AdminUser[];
   settings: SchoolSettings;
   toastMessage: string | null;
-  addStaff: (data: Omit<Staff, 'id' | 'username' | 'createdAt'>) => string;
-  deleteStaff: (id: string) => void;
-  addClass: (name: string, department: string, capacity?: number) => void;
-  addSubject: (name: string, code: string, category: Subject['category']) => void;
-  addStudent: (data: Omit<Student, 'id' | 'admissionNo' | 'status'>) => string;
-  generateScratchCards: (count?: number) => void;
+  isFirebaseSynced: boolean;
+  addStaff: (data: Omit<Staff, 'id' | 'username' | 'createdAt'>) => Promise<string>;
+  deleteStaff: (id: string) => Promise<void>;
+  addClass: (name: string, department: string, capacity?: number) => Promise<void>;
+  addSubject: (name: string, code: string, category: Subject['category']) => Promise<void>;
+  addStudent: (data: Omit<Student, 'id' | 'admissionNo' | 'status'>) => Promise<string>;
+  generateScratchCards: (count?: number) => Promise<void>;
   verifyScratchCard: (admissionNo: string, pin: string) => { valid: boolean; message: string; result?: StudentResult };
-  saveResult: (result: StudentResult) => void;
-  updateSettings: (newSettings: Partial<SchoolSettings>) => void;
+  saveResult: (result: StudentResult) => Promise<void>;
+  updateSettings: (newSettings: Partial<SchoolSettings>) => Promise<void>;
   showToast: (msg: string) => void;
-  resetToInitialDemo: () => void;
+  resetToInitialDemo: () => Promise<void>;
 }
 
 const INITIAL_CLASSES: ClassRoom[] = [
@@ -197,94 +207,197 @@ const INITIAL_SETTINGS: SchoolSettings = {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Staff list: initially load from local storage or empty (or with Yahaya if saved)
-  const [staffList, setStaffList] = useState<Staff[]>(() => {
-    const saved = localStorage.getItem('gstc_staff');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return [];
-      }
-    }
-    // Default to Yahaya already registered as seen at end of video,
-    // so if someone refreshes or wants to see the registered staff table it's there.
-    return [
-      {
-        id: 'stf-001',
-        username: 'GSTC/Stf/001',
-        name: 'Yahaya',
-        phone: '08063731128',
-        email: 'habakkukemmanuel0@gmail.com',
-        subjectsTaught: ['English Language'],
-        formTeacherOf: 'CCS 1',
-        createdAt: '2026-09-25',
-      },
-    ];
-  });
-
-  const [classList, setClassList] = useState<ClassRoom[]>(() => {
-    const saved = localStorage.getItem('gstc_classes');
-    return saved ? JSON.parse(saved) : INITIAL_CLASSES;
-  });
-
-  const [subjectList, setSubjectList] = useState<Subject[]>(() => {
-    const saved = localStorage.getItem('gstc_subjects');
-    return saved ? JSON.parse(saved) : INITIAL_SUBJECTS;
-  });
-
-  const [studentList, setStudentList] = useState<Student[]>(() => {
-    const saved = localStorage.getItem('gstc_students');
-    return saved ? JSON.parse(saved) : INITIAL_STUDENTS;
-  });
-
-  const [scratchCards, setScratchCards] = useState<ScratchCard[]>(() => {
-    const saved = localStorage.getItem('gstc_cards');
-    return saved ? JSON.parse(saved) : INITIAL_SCRATCH_CARDS;
-  });
-
-  const [resultsList, setResultsList] = useState<StudentResult[]>(() => {
-    const saved = localStorage.getItem('gstc_results');
-    return saved ? JSON.parse(saved) : INITIAL_RESULTS;
-  });
-
+  const [staffList, setStaffList] = useState<Staff[]>([]);
+  const [classList, setClassList] = useState<ClassRoom[]>(INITIAL_CLASSES);
+  const [subjectList, setSubjectList] = useState<Subject[]>(INITIAL_SUBJECTS);
+  const [studentList, setStudentList] = useState<Student[]>(INITIAL_STUDENTS);
+  const [scratchCards, setScratchCards] = useState<ScratchCard[]>(INITIAL_SCRATCH_CARDS);
+  const [resultsList, setResultsList] = useState<StudentResult[]>(INITIAL_RESULTS);
   const [adminList] = useState<AdminUser[]>(INITIAL_ADMINS);
-  const [settings, setSettings] = useState<SchoolSettings>(() => {
-    const saved = localStorage.getItem('gstc_settings');
-    return saved ? JSON.parse(saved) : INITIAL_SETTINGS;
-  });
-
+  const [settings, setSettings] = useState<SchoolSettings>(INITIAL_SETTINGS);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isFirebaseSynced, setIsFirebaseSynced] = useState(false);
 
+  // Set up real-time Firestore synchronization
   useEffect(() => {
-    localStorage.setItem('gstc_staff', JSON.stringify(staffList));
-  }, [staffList]);
+    // 1. Staff Listener
+    const unsubStaff = onSnapshot(
+      collection(db, 'staff'),
+      async (snapshot) => {
+        if (snapshot.empty) {
+          // Default initial Yahaya staff from video
+          const defaultStaff: Staff = {
+            id: 'stf-001',
+            username: 'GSTC/Stf/001',
+            name: 'Yahaya',
+            phone: '08063731128',
+            email: 'habakkukemmanuel0@gmail.com',
+            subjectsTaught: ['English Language'],
+            formTeacherOf: 'CCS 1',
+            createdAt: '2026-09-25',
+          };
+          try {
+            await setDoc(doc(db, 'staff', defaultStaff.id), defaultStaff);
+          } catch {
+            setStaffList([defaultStaff]);
+          }
+        } else {
+          const list: Staff[] = [];
+          snapshot.forEach((d) => list.push(d.data() as Staff));
+          setStaffList(list);
+        }
+        setIsFirebaseSynced(true);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'staff');
+      }
+    );
 
-  useEffect(() => {
-    localStorage.setItem('gstc_classes', JSON.stringify(classList));
-  }, [classList]);
+    // 2. Classes Listener
+    const unsubClasses = onSnapshot(
+      collection(db, 'classes'),
+      async (snapshot) => {
+        if (snapshot.empty) {
+          for (const cls of INITIAL_CLASSES) {
+            try {
+              await setDoc(doc(db, 'classes', cls.id), cls);
+            } catch {
+              // fallback
+            }
+          }
+        } else {
+          const list: ClassRoom[] = [];
+          snapshot.forEach((d) => list.push(d.data() as ClassRoom));
+          setClassList(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'classes');
+      }
+    );
 
-  useEffect(() => {
-    localStorage.setItem('gstc_subjects', JSON.stringify(subjectList));
-  }, [subjectList]);
+    // 3. Subjects Listener
+    const unsubSubjects = onSnapshot(
+      collection(db, 'subjects'),
+      async (snapshot) => {
+        if (snapshot.empty) {
+          for (const s of INITIAL_SUBJECTS) {
+            try {
+              await setDoc(doc(db, 'subjects', s.id), s);
+            } catch {
+              // fallback
+            }
+          }
+        } else {
+          const list: Subject[] = [];
+          snapshot.forEach((d) => list.push(d.data() as Subject));
+          setSubjectList(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'subjects');
+      }
+    );
 
-  useEffect(() => {
-    localStorage.setItem('gstc_students', JSON.stringify(studentList));
-  }, [studentList]);
+    // 4. Students Listener
+    const unsubStudents = onSnapshot(
+      collection(db, 'students'),
+      async (snapshot) => {
+        if (snapshot.empty) {
+          for (const st of INITIAL_STUDENTS) {
+            try {
+              await setDoc(doc(db, 'students', st.id), st);
+            } catch {
+              // fallback
+            }
+          }
+        } else {
+          const list: Student[] = [];
+          snapshot.forEach((d) => list.push(d.data() as Student));
+          setStudentList(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'students');
+      }
+    );
 
-  useEffect(() => {
-    localStorage.setItem('gstc_cards', JSON.stringify(scratchCards));
-  }, [scratchCards]);
+    // 5. Scratch Cards Listener
+    const unsubCards = onSnapshot(
+      collection(db, 'scratchCards'),
+      async (snapshot) => {
+        if (snapshot.empty) {
+          for (const c of INITIAL_SCRATCH_CARDS) {
+            try {
+              await setDoc(doc(db, 'scratchCards', c.id), c);
+            } catch {
+              // fallback
+            }
+          }
+        } else {
+          const list: ScratchCard[] = [];
+          snapshot.forEach((d) => list.push(d.data() as ScratchCard));
+          setScratchCards(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'scratchCards');
+      }
+    );
 
-  useEffect(() => {
-    localStorage.setItem('gstc_results', JSON.stringify(resultsList));
-  }, [resultsList]);
+    // 6. Results Listener
+    const unsubResults = onSnapshot(
+      collection(db, 'results'),
+      async (snapshot) => {
+        if (snapshot.empty) {
+          for (const r of INITIAL_RESULTS) {
+            try {
+              await setDoc(doc(db, 'results', r.id), r);
+            } catch {
+              // fallback
+            }
+          }
+        } else {
+          const list: StudentResult[] = [];
+          snapshot.forEach((d) => list.push(d.data() as StudentResult));
+          setResultsList(list);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'results');
+      }
+    );
 
-  useEffect(() => {
-    localStorage.setItem('gstc_settings', JSON.stringify(settings));
-  }, [settings]);
+    // 7. Settings Document Listener
+    const unsubSettings = onSnapshot(
+      doc(db, 'settings', 'config'),
+      async (snapshot) => {
+        if (!snapshot.exists()) {
+          try {
+            await setDoc(doc(db, 'settings', 'config'), INITIAL_SETTINGS);
+          } catch {
+            // fallback
+          }
+        } else {
+          setSettings(snapshot.data() as SchoolSettings);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'settings/config');
+      }
+    );
 
-  // Derive teaching assignments: each staff member teaching subjects
+    return () => {
+      unsubStaff();
+      unsubClasses();
+      unsubSubjects();
+      unsubStudents();
+      unsubCards();
+      unsubResults();
+      unsubSettings();
+    };
+  }, []);
+
   const assignmentList: TeachingAssignment[] = staffList.flatMap((stf) =>
     stf.subjectsTaught.map((subj, idx) => ({
       id: `asg-${stf.id}-${idx}`,
@@ -304,88 +417,101 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, 3500);
   };
 
-  const addStaff = (data: Omit<Staff, 'id' | 'username' | 'createdAt'>): string => {
-    // Generate username like GSTC/Stf/001, GSTC/Stf/002...
+  const addStaff = async (data: Omit<Staff, 'id' | 'username' | 'createdAt'>): Promise<string> => {
     const count = staffList.length + 1;
     const formattedId = `GSTC/Stf/${String(count).padStart(3, '0')}`;
+    const id = `stf-${Date.now()}`;
     const newStaff: Staff = {
       ...data,
-      id: `stf-${Date.now()}`,
+      id,
       username: formattedId,
       createdAt: new Date().toISOString().split('T')[0],
     };
 
-    setStaffList((prev) => [...prev, newStaff]);
-
-    // Update class form teacher if assigned
-    if (data.formTeacherOf && data.formTeacherOf !== 'None') {
-      setClassList((prev) =>
-        prev.map((cls) =>
-          cls.name === data.formTeacherOf
-            ? { ...cls, formTeacherName: data.name }
-            : cls
-        )
-      );
+    try {
+      await setDoc(doc(db, 'staff', id), newStaff);
+      if (data.formTeacherOf && data.formTeacherOf !== 'None') {
+        const matchingClass = classList.find((c) => c.name === data.formTeacherOf);
+        if (matchingClass) {
+          await setDoc(doc(db, 'classes', matchingClass.id), {
+            ...matchingClass,
+            formTeacherName: data.name,
+          });
+        }
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `staff/${id}`);
     }
 
     showToast('Staff saved');
     return formattedId;
   };
 
-  const deleteStaff = (id: string) => {
-    setStaffList((prev) => prev.filter((s) => s.id !== id));
+  const deleteStaff = async (id: string): Promise<void> => {
+    try {
+      await deleteDoc(doc(db, 'staff', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `staff/${id}`);
+    }
     showToast('Staff removed successfully');
   };
 
-  const addClass = (name: string, department: string, capacity = 40) => {
+  const addClass = async (name: string, department: string, capacity = 40): Promise<void> => {
+    const id = `cls-${Date.now()}`;
     const newClass: ClassRoom = {
-      id: `cls-${Date.now()}`,
+      id,
       name,
       department,
       formTeacherName: 'None',
       studentCount: 0,
       capacity,
     };
-    setClassList((prev) => [...prev, newClass]);
+    try {
+      await setDoc(doc(db, 'classes', id), newClass);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `classes/${id}`);
+    }
     showToast(`Class ${name} created`);
   };
 
-  const addSubject = (name: string, code: string, category: Subject['category']) => {
+  const addSubject = async (name: string, code: string, category: Subject['category']): Promise<void> => {
+    const id = `sub-${Date.now()}`;
     const newSubj: Subject = {
-      id: `sub-${Date.now()}`,
+      id,
       name,
       code,
       category,
       assignedTeachers: [],
     };
-    setSubjectList((prev) => [...prev, newSubj]);
+    try {
+      await setDoc(doc(db, 'subjects', id), newSubj);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `subjects/${id}`);
+    }
     showToast(`Subject ${name} added`);
   };
 
-  const addStudent = (data: Omit<Student, 'id' | 'admissionNo' | 'status'>): string => {
+  const addStudent = async (data: Omit<Student, 'id' | 'admissionNo' | 'status'>): Promise<string> => {
     const currentYear = new Date().getFullYear();
     const count = studentList.length + 1;
     const admissionNo = `GSTC/${currentYear}/${String(count).padStart(3, '0')}`;
-    
-    // Auto-generate a scratch card for this student
     const pinPart1 = Math.floor(1000 + Math.random() * 9000);
     const pinPart2 = Math.floor(1000 + Math.random() * 9000);
     const pinPart3 = Math.floor(1000 + Math.random() * 9000);
     const generatedPin = `${pinPart1}-${pinPart2}-${pinPart3}`;
 
+    const studentId = `std-${Date.now()}`;
     const newStudent: Student = {
       ...data,
-      id: `std-${Date.now()}`,
+      id: studentId,
       admissionNo,
       scratchCardPin: generatedPin,
       status: 'Active',
     };
 
-    setStudentList((prev) => [...prev, newStudent]);
-
-    // Also register the scratch card
+    const cardId = `crd-${Date.now()}`;
     const newCard: ScratchCard = {
-      id: `crd-${Date.now()}`,
+      id: cardId,
       serialNumber: `GSTC-${currentYear}-${Math.floor(100000 + Math.random() * 900000)}`,
       pin: generatedPin,
       maxUsage: 5,
@@ -394,43 +520,53 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       usedByAdmissionNo: admissionNo,
       createdAt: new Date().toISOString().split('T')[0],
     };
-    setScratchCards((prev) => [newCard, ...prev]);
 
-    // Update class student count
-    setClassList((prev) =>
-      prev.map((cls) =>
-        cls.name === data.className ? { ...cls, studentCount: cls.studentCount + 1 } : cls
-      )
-    );
+    try {
+      await setDoc(doc(db, 'students', studentId), newStudent);
+      await setDoc(doc(db, 'scratchCards', cardId), newCard);
+
+      const targetClass = classList.find((c) => c.name === data.className);
+      if (targetClass) {
+        await setDoc(doc(db, 'classes', targetClass.id), {
+          ...targetClass,
+          studentCount: targetClass.studentCount + 1,
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `students/${studentId}`);
+    }
 
     showToast(`Student registered: ${admissionNo}`);
     return admissionNo;
   };
 
-  const generateScratchCards = (count = 5) => {
+  const generateScratchCards = async (count = 5): Promise<void> => {
     const currentYear = new Date().getFullYear();
-    const newCards: ScratchCard[] = [];
-
     for (let i = 0; i < count; i++) {
       const p1 = Math.floor(1000 + Math.random() * 9000);
       const p2 = Math.floor(1000 + Math.random() * 9000);
       const p3 = Math.floor(1000 + Math.random() * 9000);
       const pin = `${p1}-${p2}-${p3}`;
       const serial = `GSTC-${currentYear}-${Math.floor(100000 + Math.random() * 900000)}`;
+      const id = `crd-${Date.now()}-${i}`;
 
-      newCards.push({
-        id: `crd-${Date.now()}-${i}`,
+      const card: ScratchCard = {
+        id,
         serialNumber: serial,
         pin,
         maxUsage: 5,
         usageCount: 0,
         status: 'active',
         createdAt: new Date().toISOString().split('T')[0],
-      });
-    }
+      };
 
-    setScratchCards((prev) => [...newCards, ...prev]);
-    showToast(`Generated ${count} new Scratch Cards`);
+      try {
+        await setDoc(doc(db, 'scratchCards', id), card);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, `scratchCards/${id}`);
+      }
+    }
+    showToast(`Generated ${count} new Scratch Cards in Firebase`);
   };
 
   const verifyScratchCard = (admissionNo: string, pin: string) => {
@@ -453,30 +589,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { valid: false, message: `Card usage limit exceeded (Max ${card.maxUsage} checks). Please purchase a new card.` };
     }
 
-    // Find student
     const student = studentList.find((s) => s.admissionNo.toUpperCase() === cleanAdm);
     if (!student) {
       return { valid: false, message: `Admission Number "${admissionNo}" not found on GSTC portal.` };
     }
 
-    // Increment usage
-    setScratchCards((prev) =>
-      prev.map((c) =>
-        c.id === card.id
-          ? {
-              ...c,
-              usageCount: c.usageCount + 1,
-              usedByAdmissionNo: cleanAdm,
-              status: c.usageCount + 1 >= c.maxUsage ? 'used' : 'active',
-            }
-          : c
-      )
-    );
+    // Persist usage update to Firestore asynchronously
+    const updatedCount = card.usageCount + 1;
+    setDoc(doc(db, 'scratchCards', card.id), {
+      ...card,
+      usageCount: updatedCount,
+      usedByAdmissionNo: cleanAdm,
+      status: updatedCount >= card.maxUsage ? 'used' : 'active',
+    }).catch((err) => {
+      console.warn('Could not sync card usage to Firestore:', err);
+    });
 
-    // Find or generate result
     let result = resultsList.find((r) => r.admissionNo.toUpperCase() === cleanAdm);
     if (!result) {
-      // Default sample result for demo
       result = {
         id: `res-${student.id}`,
         studentId: student.id,
@@ -501,42 +631,44 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         principalRemarks: 'A very commendable result. Keep it up.',
         nextTermBegins: settings.nextTermResumption,
       };
-      setResultsList((prev) => [...prev, result!]);
+      setDoc(doc(db, 'results', result.id), result).catch(() => {});
     }
 
     return {
       valid: true,
-      message: `Card verified! ${card.maxUsage - (card.usageCount + 1)} uses remaining.`,
+      message: `Card verified! ${card.maxUsage - updatedCount} uses remaining.`,
       result,
     };
   };
 
-  const saveResult = (result: StudentResult) => {
-    setResultsList((prev) => {
-      const idx = prev.findIndex((r) => r.id === result.id || r.admissionNo === result.admissionNo);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = result;
-        return copy;
-      }
-      return [...prev, result];
-    });
-    showToast('Result saved successfully');
+  const saveResult = async (result: StudentResult): Promise<void> => {
+    try {
+      await setDoc(doc(db, 'results', result.id), result);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `results/${result.id}`);
+    }
+    showToast('Result saved to Firebase');
   };
 
-  const updateSettings = (newSettings: Partial<SchoolSettings>) => {
-    setSettings((prev) => ({ ...prev, ...newSettings }));
+  const updateSettings = async (newSettings: Partial<SchoolSettings>): Promise<void> => {
+    const merged = { ...settings, ...newSettings };
+    try {
+      await setDoc(doc(db, 'settings', 'config'), merged);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/config');
+    }
     showToast('Settings updated');
   };
 
-  const resetToInitialDemo = () => {
-    setStaffList([]);
-    setClassList(INITIAL_CLASSES);
-    setSubjectList(INITIAL_SUBJECTS);
-    setStudentList(INITIAL_STUDENTS);
-    setScratchCards(INITIAL_SCRATCH_CARDS);
-    setResultsList(INITIAL_RESULTS);
-    setSettings(INITIAL_SETTINGS);
+  const resetToInitialDemo = async (): Promise<void> => {
+    try {
+      const staffSnap = await getDocs(collection(db, 'staff'));
+      for (const d of staffSnap.docs) {
+        await deleteDoc(d.ref);
+      }
+    } catch (error) {
+      // fallback
+    }
     showToast('Portal reset to initial video snapshot (0 staff)');
   };
 
@@ -553,6 +685,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         adminList,
         settings,
         toastMessage,
+        isFirebaseSynced,
         addStaff,
         deleteStaff,
         addClass,

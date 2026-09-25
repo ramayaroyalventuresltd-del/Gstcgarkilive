@@ -108,14 +108,24 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({ activeTab, onSelectTab }) 
               </select>
             </div>
 
-            {/* Current user badge */}
-            <div className="hidden md:flex flex-col text-right">
-              <span className="text-xs font-semibold text-white truncate max-w-[140px]">
-                {user?.name}
-              </span>
-              <span className="text-[10px] text-emerald-200 capitalize font-medium">
-                {user?.role}
-              </span>
+            {/* Current user badge & avatar */}
+            <div className="hidden md:flex items-center gap-2.5">
+              {user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={user.name}
+                  className="w-8 h-8 rounded-full border border-emerald-400/80 object-cover"
+                />
+              ) : null}
+              <div className="flex flex-col text-right">
+                <span className="text-xs font-semibold text-white truncate max-w-[140px]">
+                  {user?.name}
+                </span>
+                <span className="text-[10px] text-emerald-200 capitalize font-medium flex items-center justify-end gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  {user?.role}
+                </span>
+              </div>
             </div>
 
             {/* Sign out link - Exact match to video top right */}
